@@ -44,6 +44,7 @@ import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.util.NumberConversions;
 import org.bukkit.util.Vector;
 
 import java.util.concurrent.ThreadLocalRandom;
@@ -53,18 +54,23 @@ public class Combustion extends CombustionAbility implements AddonAbility {
 
 	@Attribute(Attribute.DAMAGE)
 	private double damage;
+	@Attribute(Attribute.SPEED)
+	private double speed;
 	@Attribute(Attribute.RANGE)
 	private int range;
 	@Attribute("Power")
-	private int power;
-	private int misfireModifier;
+	private double power;
+	private double misfireModifier;
 	@Attribute(Attribute.CHARGE_DURATION)
 	private long chargeTime;
 	@Attribute(Attribute.COOLDOWN)
 	private long cooldown;
 	@Attribute("RegenDelay")
 	private long regenDelay;
+	@Attribute(Attribute.FIRE_TICK)
+	private int fireTicks;
 
+	private boolean scalingDamageByDistance;
 	private boolean charged;
 	private boolean launched;
 	private boolean hasExploded;
@@ -86,12 +92,15 @@ public class Combustion extends CombustionAbility implements AddonAbility {
 
 		long currentLevel = GeneralMethods.limitLevels(player, StatisticsMethods.getId("AbilityLevel_" + getName()));
 		damage = ScaleMethods.getDouble("Abilities.Fire.Combustion.Damage", currentLevel);
+		speed = ScaleMethods.getDouble("Abilities.Fire.Combustion.Speed", currentLevel);
 		cooldown = ScaleMethods.getLong("Abilities.Fire.Combustion.Cooldown", currentLevel);
 		range = ScaleMethods.getInt("Abilities.Fire.Combustion.Range", currentLevel);
 		chargeTime = ScaleMethods.getLong("Abilities.Fire.Combustion.ChargeTime", currentLevel);
-		power = ScaleMethods.getInt("Abilities.Fire.Combustion.Power", currentLevel);
-		misfireModifier = ScaleMethods.getInt("Abilities.Fire.Combustion.MisfireModifier", currentLevel);
+		power = ScaleMethods.getDouble("Abilities.Fire.Combustion.Power", currentLevel);
+		misfireModifier = ScaleMethods.getDouble("Abilities.Fire.Combustion.MisfireModifier", currentLevel);
 		regenDelay = ScaleMethods.getLong("Abilities.Fire.Combustion.RegenDelay", currentLevel);
+		fireTicks = ScaleMethods.getInt("Abilities.Fire.Combustion.FireTicks", currentLevel);
+		scalingDamageByDistance = Hyperion.getPlugin().getConfig().getBoolean("Abilities.Fire.Combustion.ScaleDamageByDistance");
 
 		charged = chargeTime <= 0;
 		launched = false;
@@ -157,7 +166,7 @@ public class Combustion extends CombustionAbility implements AddonAbility {
 				ParticleEffect.FIREWORKS_SPARK.display(location.clone().add(temp), 0, dir.getX(), dir.getY(), dir.getZ(), 0.12);
 			}
 		}
-		for (int i = 0; i < 5; i++) {
+		for (int i = 0; i < NumberConversions.round(speed / 0.4); i++) {
 			distanceTravelled += 0.4;
 			if (distanceTravelled > range) {
 				remove();
@@ -183,7 +192,7 @@ public class Combustion extends CombustionAbility implements AddonAbility {
 		}
 	}
 
-	private void createExplosion(Location center, int size, double damage) {
+	private void createExplosion(Location center, double size, double damage) {
 		if (hasExploded) return;
 		hasExploded = true;
 		ParticleEffect.FLAME.display(center, 20, 1, 1, 1, 0.5f, 20);
@@ -194,7 +203,8 @@ public class Combustion extends CombustionAbility implements AddonAbility {
 		center.getWorld().playSound(center, Sound.ENTITY_GENERIC_EXPLODE, 1, 1);
 
 		if (regenDelay > 0 && !center.getBlock().isLiquid()) {
-			for (Location l : GeneralMethods.getCircle(center, size, 1, false, true, 0)) {
+			int r = NumberConversions.round(size);
+			for (Location l : GeneralMethods.getCircle(center, r, 1, false, true, 0)) {
 				if (GeneralMethods.isRegionProtectedFromBuild(this, l)) {
 					remove();
 					return;
@@ -213,8 +223,14 @@ public class Combustion extends CombustionAbility implements AddonAbility {
 				if (e instanceof Player && Commands.invincible.contains((e).getName())) {
 					continue;
 				}
-				DamageHandler.damageEntity(e, damage, this);
-				e.setFireTicks(40);
+				double factor = 1;
+				if (scalingDamageByDistance) {
+					double distance = center.distance(e.getLocation());
+					double halfSize = size / 2;
+					factor = (distance <= halfSize) ? 1 : (distance - halfSize) / size;
+				}
+				DamageHandler.damageEntity(e, damage * factor, this);
+				e.setFireTicks(fireTicks);
 				new FireDamageTimer(e, player);
 			}
 		}
